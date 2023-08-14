@@ -287,7 +287,9 @@ class WebServer {
       if ($_.Extension -ne '.html') {
         return
       }
-      $path = '/' + ($_.FullName -replace ("$(((Get-Location).path -replace '.*::') -replace '\\', '\\')\\pages\\") -replace '(index|).html' -replace '\\', '/' -replace '/$')
+    
+      $path = '/' + ($_.FullName -replace ("$((($this.path) -replace '.*::') -replace '\\', '\\')\\pages\\") -replace '(index|).html' -replace '\\', '/' -replace '/$')
+      write-host (($this.path) -replace '\\', '\\')
       if (($path -replace '^/') -in $this.endpoints.Name) {
         return
       }
