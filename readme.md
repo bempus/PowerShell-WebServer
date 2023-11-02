@@ -20,3 +20,7 @@ I got tired of the Windows Forms when building GUI's for my powershell applicati
   - Any other files will be ignored, but can be loaded from inside the .html files.
 
 - It is recommended to place scripts in a "Scripts" folder and Assets in an "Assets" folder
+
+## Support
+
+- Supports major JavaScript frameworks like React

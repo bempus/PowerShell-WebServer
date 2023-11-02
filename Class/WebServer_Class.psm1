@@ -18,8 +18,9 @@ Class ContentType {
   static [string]$ImageGif = "image/gif"
   static [string]$ImageBmp = "image/bmp"
   static [string]$ImageIco = "image/vnd.microsoft.icon"
+  static [string]$ImageSvg  = "image/svg+xml"
   static [string]$FontWoff = "font/woff" 
-  static [string]$FontWoff2 = "font/woff2" 
+  static [string]$FontWoff2 = "font/woff2"
 
 
   ContentType([string]$value) {
@@ -46,6 +47,7 @@ Class ContentType {
       "image/gif",
       "image/bmp",
       "image/vnd.microsoft.icon",
+      "image/svg+xml",
       "application/gzip",
       "font/woff",
       "font/woff2"
@@ -269,6 +271,7 @@ class WebServer {
   #----------------------------------------------------------------
   [void] hidden CreateListener() {
     if ($this.listener) { return }
+    $this.GetClosestPort($this.port)
     $this.listener = [System.Net.HttpListener]::new()
     $this.listener.Prefixes.Add("http://+:$($this.port)/")
     $this.listener.Start()
@@ -287,9 +290,7 @@ class WebServer {
       if ($_.Extension -ne '.html') {
         return
       }
-    
-      $path = '/' + ($_.FullName -replace ("$((($this.path) -replace '.*::') -replace '\\', '\\')\\pages\\") -replace '(index|).html' -replace '\\', '/' -replace '/$')
-      write-host (($this.path) -replace '\\', '\\')
+      $path = '/' + ($_.FullName -replace ("$(((Get-Location).path -replace '.*::') -replace '\\', '\\')\\pages\\") -replace '(index|).html' -replace '\\', '/' -replace '/$')
       if (($path -replace '^/') -in $this.endpoints.Name) {
         return
       }
@@ -337,7 +338,7 @@ class WebServer {
   # Starts the server on specified port 
   # (If port is in use, the next avaliable port will be used)
   #----------------------------------------------------------------
-  [void]Start([int16]$port) {
+  [void]Start() {
     function Send-Response {
       param(
         [System.Net.HttpListenerResponse]$res,
@@ -372,7 +373,9 @@ class WebServer {
       }
     }
   
-    $this.CreateListener()
+    if(-not $this.listener) {
+      $this.CreateListener()
+    }
       
     #----------------------------------------------------------------
     # Retrieves the Paths to Static Files
@@ -392,7 +395,7 @@ class WebServer {
       $this.AddAPIEndpoints((Get-Item -Path $apiPath))
     }
 
-    Write-Host "Server started on port $port (http://localhost:$($port))" -ForegroundColor Green
+    Write-Host "Server started on port $($this.port) (http://localhost:$($this.port))" -ForegroundColor Green
     Write-Host "Avaliable endpoints:"
   
     #----------------------------------------------------------------
@@ -419,7 +422,7 @@ class WebServer {
       }
   
       $urlPath = Join-Path -Path $this.body.path -ChildPath ($req.url -replace ".*localhost:$($this.port)")
-      $ext = if (Test-Path -Path $urlPath) { (Get-Item -Path $urlPath).Extension -replace '\.' }
+      $ext = if (Test-Path -Path $urlPath) { (Get-Item -Path $urlPath).Extension -replace '\.'}
 
       if ($ext) {
         try {
@@ -428,13 +431,14 @@ class WebServer {
             'js' { [ContentType]::textJavaScript }
             'css' { [ContentType]::textCSS }
             'html' { [ContentType]::textHTML }
-            'png' { [ContentType]::ImagePng }
+            'png'   {[ContentType]::ImagePng}
             { $_ -match '^jpe?g$' } { [ContentType]::ImageJpeg }
             'gif' { [ContentType]::ImageGif }
             'mp3' { [ContentType]::AudioMP3 }
             'mp4' { [ContentType]::ApplicationMP4 }
             'ico' { [ContentType]::ImageIco }
             'bmp' { [ContentType]::ImageBmp }
+            'svg' {[ContentType]::ImageSvg}
             Default { [ContentType]::textHTML }
           }    
         }
@@ -443,11 +447,10 @@ class WebServer {
           $content = "404 - Not Found"
           $contentType = [ContentType]::textHTML
         }
-        if ($contentType -notlike 'text*') {
+        if($contentType -notlike 'text*') {
           Send-Response -res $res -path $urlPath -contentType $contentType
-        }
-        else {
-          Send-Response -res $res -message $content -contentType $contentType
+        }else {
+        Send-Response -res $res -message $content -contentType $contentType
         }
         return
       }
@@ -467,7 +470,7 @@ class WebServer {
       }
 
       $message = try {
-       
+        $this.body = @{}       
         if ($req.HasEntityBody) {
           
           [System.IO.StreamReader]::new($req.InputStream).ReadLine() | ForEach-Object {
@@ -481,6 +484,7 @@ class WebServer {
           }
         }
         $this.body.path = (Get-Location).Path
+        $this.body.method = $req.HTTPmethod
         $ContentType = $endpoint.ContentType
        
         $result = Invoke-Command -ScriptBlock $endpoint.Callback -ArgumentList $this.body -ErrorAction Stop
@@ -512,18 +516,23 @@ class WebServer {
     #----------------------------------------------------------------
     #----------------------------------------------------------------
 
+    $MAX_THREADS = 10
+    $pool = [runspacefactory]::CreateRunspacePool(1, $MAX_THREADS)
+    $pool.Open()
     #----------------------------------------------------------------
     # Request handler
     #----------------------------------------------------------------
     while ($true) {
       try {
         $context = $this.listener.GetContext()
-        $status = Invoke-Request -context $context
+
+
+        $status =  Invoke-Request -context $context
         if ($status -eq 'Stop') {
           return
         }
       }
-      catch {}
+      catch {Write-host $_ -ForegroundColor red}
     }
   }
   #----------------------------------------------------------------
@@ -533,9 +542,9 @@ class WebServer {
   #----------------------------------------------------------------
   # Starts the WebServer on the Instance's default port
   #----------------------------------------------------------------
-  [void]Start() {
-    $this.GetClosestPort($this.port)
-    $this.Start($this.port)
+  [void]Start([int16]$port) {
+    $this.port = $port
+    $this.Start()
   }
 
   #----------------------------------------------------------------
@@ -543,10 +552,10 @@ class WebServer {
   #----------------------------------------------------------------
 
   [void]Start([int16]$port, [switch]$InBrowser) {
-    $this.GetClosestPort($port)
+    $this.port = $port
     $this.CreateListener()
     $this.OpenInBrowser()
-    $this.Start($this.port)
+    $this.Start()
   }
 
 
@@ -555,7 +564,6 @@ class WebServer {
   #----------------------------------------------------------------
 
   [void]Start([switch]$InBrowser) {
-    $this.GetClosestPort($this.port)
     $this.CreateListener()
     $this.OpenInBrowser()
     $this.Start($this.port)
@@ -589,5 +597,3 @@ class WebServer {
   }
 
 }
-
-
