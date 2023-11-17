@@ -18,7 +18,7 @@ Class ContentType {
   static [string]$ImageGif = "image/gif"
   static [string]$ImageBmp = "image/bmp"
   static [string]$ImageIco = "image/vnd.microsoft.icon"
-  static [string]$ImageSvg  = "image/svg+xml"
+  static [string]$ImageSvg = "image/svg+xml"
   static [string]$FontWoff = "font/woff" 
   static [string]$FontWoff2 = "font/woff2"
 
@@ -70,10 +70,32 @@ class WebServer {
   [System.Net.HttpListener] hidden $listener
   [int16] hidden $port = 9001
   [string] hidden $path = ((Get-Location).Path -replace '.*::')
+  [string] hidden $TrayIconPath
+  hidden $TrayApp
+  hidden $apiChange
+ 
   $body = @{}
 
   [void] SetPath([string]$path) {
     $this.path = $path -replace '.*::'
+  }
+
+  [bool] hidden ValidateTrayIconPath([string]$path) {
+    if (-not $path) {
+      return $false
+    }
+    if (-not (Test-Path -Path $path -PathType Leaf -Include '*.ico')) {
+      return $false
+    }
+    return $true
+  }
+
+  [void] SetTrayIconPath([string]$path) {
+    if (-not $this.ValidateTrayIconPath($path)) {
+      Write-Host "Invalid path: ""$path"", file either does not exist, is a folder or is not of type .ico" -ForegroundColor Red
+      return
+    }
+    $this.TrayIconPath = $path
   }
 
   [void] hidden GetClosestPort([int16]$port) {
@@ -334,11 +356,100 @@ class WebServer {
   }
 
 
+  [void]ListEndpoints() {
+    #----------------------------------------------------------------
+    # Retrieves the Paths to Static Files
+    # Expects a Pages folder for Static Endpoints
+    #   - Expects .html files, ignores others
+    # Expects an API folder for Static APIs
+    #   - Expects .ps1 files, ignores others
+    #----------------------------------------------------------------
+
+    #----------------------------------------------------------------
+    # Sets initial Pages- and API-endpoints
+    #----------------------------------------------------------------
+    $pagesPath = (Join-Path -path $this.path -ChildPath 'pages')
+    $apiPath = (Join-Path -path $this.path -ChildPath 'api')
+
+    if (Test-Path $pagesPath) {
+      $this.AddPagesEndpoints((Get-Item -Path $pagesPath))
+    }
+    if (Test-Path $apiPath) {
+      $this.AddAPIEndpoints((Get-Item -Path $apiPath))
+    }
+
+    Write-Host "Server started on port $($this.port) (http://localhost:$($this.port))" -ForegroundColor Green
+    Write-Host "Avaliable endpoints:"
+
+    #----------------------------------------------------------------
+    # Writes all endpoints to console
+    #----------------------------------------------------------------
+    foreach ($endpoint in $this.endpoints) {
+      Write-Host "/$($endpoint.name)" -ForegroundColor Magenta
+    }
+    Write-Host "/end (Closes the server)" -ForegroundColor Yellow
+    $this.body.path = (Get-Location)
+  }
+
   #----------------------------------------------------------------
   # Starts the server on specified port 
   # (If port is in use, the next avaliable port will be used)
   #----------------------------------------------------------------
   [void]Start() {
+
+    #----------------------------------------------------------------
+    # Creates a Tray Icon if TrayIconPath:
+    # * is set
+    # * exists 
+    # * is a file
+    # * has extension *.ico
+    #----------------------------------------------------------------
+    if ($this.ValidateTrayIconPath($this.TrayIconPath)) {
+      $this.TrayApp = Start-Process PowerShell -ArgumentList @"
+    function Open-App {
+        Start-Job -ScriptBlock {
+          Start-Process -FilePath (Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe\').'(default)' -ArgumentList ('--app=http://localhost:$($this.port)')
+        } 
+      }
+      
+      [void] [System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms')
+      
+      `$ContextMenuStopServer = [System.Windows.Forms.MenuItem]::new('Avsluta', {
+          [System.Windows.Forms.Application]::Exit()
+          Invoke-WebRequest -Uri 'http://localhost:$($this.port)/end'
+        })
+        
+        `$ContextMenuOpenApp = [System.Windows.Forms.MenuItem]::new('Open App', { Open-App -port $($this.port) })
+        `$ContextMenuOpenInBrowser = [System.Windows.Forms.MenuItem]::new('Open in Browser', { Start-Process ('http://localhost:$($this.port)') })
+        `$ContextMenuRenewEndpoints = [System.Windows.Forms.MenuItem]::new('Reload Endpoints', { Invoke-WebRequest -Uri 'http://localhost:$($this.port)/.config/refresh-endpoints' })
+
+        `$contextMenu = [System.Windows.Forms.ContextMenu]::new()
+        `$null = `$contextMenu.MenuItems.Add(`$ContextMenuOpenApp)
+        `$null = `$contextMenu.MenuItems.Add(`$ContextMenuOpenInBrowser)
+        `$null = `$contextMenu.MenuItems.Add('-')
+        `$null = `$contextMenu.MenuItems.Add(`$ContextMenuRenewEndpoints)
+        `$null = `$contextMenu.MenuItems.Add('-')
+        `$null = `$contextMenu.MenuItems.Add(`$ContextMenuStopServer)
+        
+        `$trayIcon = New-Object System.Windows.Forms.NotifyIcon
+        
+        `$trayIcon.Icon = '$($this.TrayIconPath)'
+        `$trayIcon.Text = 'PowerHub'
+        
+        `$trayIcon.ContextMenu = `$contextMenu
+
+        `$trayIcon.Add_DoubleClick({
+          if (`$_.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
+            Open-App -port $($this.port)
+          }
+        })
+  
+      `$trayIcon.Visible = `$true
+      [System.Windows.Forms.Application]::Run()
+      
+"@ -WindowStyle Hidden -PassThru    
+    }
+
     function Send-Response {
       param(
         [System.Net.HttpListenerResponse]$res,
@@ -358,10 +469,14 @@ class WebServer {
         else {
           [byte[]]$buffer = [System.Text.Encoding]::UTF8.GetBytes($message)
         }
-      
+        
+        $res.AddHeader("Access-Control-Allow-Headers", "Content-Type, Accept, X-Requested-With")
+        $res.AddHeader("Access-Control-Allow-Methods", "GET, POST")
+        $res.AddHeader("Access-Control-Allow-Origin", "*")
+
         $res.ContentType = $contentType
         $res.contentLength64 = $buffer.Length
-      
+        
         $output = $res.OutputStream
         $output.write($buffer, 0, $buffer.Length)
         $output.close()
@@ -373,56 +488,39 @@ class WebServer {
       }
     }
   
-    if(-not $this.listener) {
+    if (-not $this.listener) {
       $this.CreateListener()
     }
       
-    #----------------------------------------------------------------
-    # Retrieves the Paths to Static Files
-    # Expects a Pages folder for Static Endpoints
-    #   - Expects .html files, ignores others
-    # Expects an API folder for Static APIs
-    #   - Expects .ps1 files, ignores others
-    #----------------------------------------------------------------
-    $pagesPath = (Join-Path -path $this.path -ChildPath 'pages')
-    $apiPath = (Join-Path -path $this.path -ChildPath 'api')
-
-
-    if (Test-Path $pagesPath) {
-      $this.AddPagesEndpoints((Get-Item -Path $pagesPath))
-    }
-    if (Test-Path $apiPath) {
-      $this.AddAPIEndpoints((Get-Item -Path $apiPath))
-    }
-
-    Write-Host "Server started on port $($this.port) (http://localhost:$($this.port))" -ForegroundColor Green
-    Write-Host "Avaliable endpoints:"
-  
-    #----------------------------------------------------------------
-    # Writes all endpoints to console
-    #----------------------------------------------------------------
-    foreach ($endpoint in $this.endpoints) {
-      Write-Host "/$($endpoint.name)" -ForegroundColor Magenta
-    }
-    Write-Host "/end (Closes the server)" -ForegroundColor Yellow
-    $this.body.path = (Get-Location)
+    $this.ListEndpoints()
 
     #----------------------------------------------------------------
     # Reads the request and send response
     #----------------------------------------------------------------
     Function Invoke-Request {
       param($context)
+
       $req = $context.Request
       $res = $context.Response
 
       if ($req.url -match '/end/?$') { 
-        Send-Response -req $req -res $res -message "Server Closed"
+        Send-Response -res $res -message "Server Closed"
         $this.Stop()
         return 'Stop'
       }
+
+      if ($req.url -match "$($this.port)/.config(/(.*)?)?") {
+        if ($req.url -match "$($this.port)/.config/refresh-endpoints") {
+          Clear-Host
+          $this.ListEndpoints()
+          Send-Response -res $res -message 'Endpoints Refreshed'
+        }
+        return
+      }
+
   
       $urlPath = Join-Path -Path $this.body.path -ChildPath ($req.url -replace ".*localhost:$($this.port)")
-      $ext = if (Test-Path -Path $urlPath) { (Get-Item -Path $urlPath).Extension -replace '\.'}
+      $ext = if (Test-Path -Path $urlPath) { (Get-Item -Path $urlPath).Extension -replace '\.' }
 
       if ($ext) {
         try {
@@ -431,14 +529,14 @@ class WebServer {
             'js' { [ContentType]::textJavaScript }
             'css' { [ContentType]::textCSS }
             'html' { [ContentType]::textHTML }
-            'png'   {[ContentType]::ImagePng}
+            'png' { [ContentType]::ImagePng }
             { $_ -match '^jpe?g$' } { [ContentType]::ImageJpeg }
             'gif' { [ContentType]::ImageGif }
             'mp3' { [ContentType]::AudioMP3 }
             'mp4' { [ContentType]::ApplicationMP4 }
             'ico' { [ContentType]::ImageIco }
             'bmp' { [ContentType]::ImageBmp }
-            'svg' {[ContentType]::ImageSvg}
+            'svg' { [ContentType]::ImageSvg }
             Default { [ContentType]::textHTML }
           }    
         }
@@ -447,10 +545,11 @@ class WebServer {
           $content = "404 - Not Found"
           $contentType = [ContentType]::textHTML
         }
-        if($contentType -notlike 'text*') {
+        if ($contentType -notlike 'text*') {
           Send-Response -res $res -path $urlPath -contentType $contentType
-        }else {
-        Send-Response -res $res -message $content -contentType $contentType
+        }
+        else {
+          Send-Response -res $res -message $content -contentType $contentType
         }
         return
       }
@@ -527,12 +626,12 @@ class WebServer {
         $context = $this.listener.GetContext()
 
 
-        $status =  Invoke-Request -context $context
+        $status = Invoke-Request -context $context
         if ($status -eq 'Stop') {
           return
         }
       }
-      catch {Write-host $_ -ForegroundColor red}
+      catch { Write-host $_ -ForegroundColor red }
     }
   }
   #----------------------------------------------------------------
@@ -577,9 +676,12 @@ class WebServer {
     if (-not $this.listener.IsListening) {
       Write-Host "Server is not running" -ForegroundColor Yellow
       return
-    }  
+    } 
+    if ($this.TrayApp) {
+      $this.TrayApp | Stop-Process
+    }
     $this.listener.Close()
-    $this.listener.Dispose() 
+    $this.listener.Dispose()
   }
 
   
