@@ -295,7 +295,7 @@ class WebServer {
     if ($this.listener) { return }
     $this.GetClosestPort($this.port)
     $this.listener = [System.Net.HttpListener]::new()
-    $this.listener.Prefixes.Add("http://+:$($this.port)/")
+    $this.listener.Prefixes.Add("http://localhost:$($this.port)/")
     $this.listener.Start()
   }
   #----------------------------------------------------------------
