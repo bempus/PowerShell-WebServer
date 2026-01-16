@@ -5,10 +5,7 @@
 
 param($body)
 
-# $body.status = 204
-
-$null = Start-Job -ScriptBlock {
-  param($message, $title)
-  Add-Type -AssemblyName System.Windows.Forms
-  [System.Windows.Forms.MessageBox]::Show($message, $title)
-} -ArgumentList $body.message, $body.title
+Add-Type -AssemblyName System.Windows.Forms
+$form = [System.Windows.Forms.Form]::new()
+$form.TopMost = $true
+[System.Windows.Forms.MessageBox]::Show($form, $body.message, $body.title)

@@ -12,5 +12,5 @@ document.querySelector("#clickme").addEventListener("click", (e) => {
 });
 
 const closeServer = () => {
-  window.location = "/end";
+  window.location = "/$end";
 };
