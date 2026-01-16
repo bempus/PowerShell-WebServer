@@ -6,6 +6,12 @@ I got tired of the Windows Forms when building GUI's for my powershell applicati
 
 ## How does it work?
 
+- Installation
+
+```ps
+ Install-Module -Name 'Bempus-WebServer'
+```
+
 - Create the server:
 
 ```ps
