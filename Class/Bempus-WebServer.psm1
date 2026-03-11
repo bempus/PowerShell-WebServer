@@ -41,6 +41,35 @@ Class ContentType {
   static [ContentType] AsType([string] $value) {
     return $value
   }
+  
+
+  static [ContentType] FromExt([string]$ext, [bool]$allowDefault) {
+    $ext = $ext -replace '^\.', ''
+    $ct = switch ($ext) {
+      'js' { [ContentType]::textJavaScript }
+      'css' { [ContentType]::textCSS }
+      'html' { [ContentType]::textHTML }
+      'png' { [ContentType]::ImagePng }
+      { $_ -match '^jpe?g$' } { [ContentType]::ImageJpeg }
+      'gif' { [ContentType]::ImageGif }
+      'mp3' { [ContentType]::AudioMP3 }
+      'mp4' { [ContentType]::VideoMP4 }
+      'ico' { [ContentType]::ImageIco }
+      'bmp' { [ContentType]::ImageBmp }
+      'svg' { [ContentType]::ImageSVG }
+      Default { 
+        if (-not $allowDefault) {
+          throw """$ext"" is not a valid extension"
+        }
+        [ContentType]::textHTML 
+      }
+    }
+    return $ct
+  }
+  static [ContentType] FromExt([string]$ext) {
+    return [ContentType]::FromExt($ext, $false)
+  }
+
   [string] ToString() {
     $allowedList = @(
       "text/plain",
@@ -84,6 +113,8 @@ class WebServer {
   [char] hidden $titleDelimiter = $null
   [int16] hidden $port = 9001
   [string] hidden $path = ((Get-Location).ProviderPath)
+  [int] hidden $appModePid = $null
+  [string] hidden $pswsTempDir = $null
   hidden $body = @{}
   hidden $query = @{}
   hidden $store = @{}
@@ -307,8 +338,14 @@ class WebServer {
   [void] hidden CreateListener() {
     if ($this.listener) { return }
     $this.listener = [System.Net.HttpListener]::new()
+    $this.GetClosestPort($this.port)
     $this.listener.Prefixes.Add("http://localhost:$($this.port)/")
     $this.listener.Start()
+  }
+
+  [void] hidden CreateListener([int]$port) {
+    $this.port = $port
+    $this.CreateListener()
   }
   #----------------------------------------------------------------
   #----------------------------------------------------------------
@@ -329,8 +366,10 @@ class WebServer {
       if (($path -replace '^/') -in $this.endpoints.Name) {
         return
       }
+
+      $contentType = [ContentType]::FromExt($_.Extension, $true)
       
-      $this.AddEndpoint($path, [scriptblock]::Create("Get-Content -Path '$($_.FullName)' -Raw -encoding UTF8"), $true )
+      $this.AddEndpoint($path, [scriptblock]::Create("Get-Content -Path '$($_.FullName)' -Raw -encoding UTF8"), $contentType, $true )
       $this.endpoints | Where-Object name -eq ($path -replace '^/') | ForEach-Object {
         $_.Base = $item.fullName -replace ($this.Path -replace '.*::' -replace '\\', '\\') -replace '\\', '/'
         $_.PageBase = $_.Base -replace '^/Pages'
@@ -400,6 +439,39 @@ class WebServer {
   }
 
 
+  [void]ParseRequest([System.Net.HttpListenerRequest]$req) {
+    $this.Method = $req.HttpMethod
+    if ($req.HasEntityBody) {
+      [System.IO.StreamReader]::new($req.InputStream).ReadLine() | ForEach-Object {
+        try {
+          $item = $_ | ConvertFrom-Json
+          $item.PSObject.Properties | ForEach-Object {
+            $this.body.($_.Name) = $_.Value
+          }
+        }
+        catch {} 
+      }
+    }
+
+    $req.Url.Query -replace '^\?' -split '&' | ForEach-Object {
+      $key, $value = $_ -split '='
+      $this.query.$key = [System.Net.WebUtility]::UrlDecode(($value -join '='))
+    }
+  }
+
+
+  hidden [byte[]] BufferFromFile([string]$path) {
+    $fstream = [System.IO.FileStream]::new($path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read)
+    [byte[]]$buffer = [byte[]]::new($fstream.Length)
+    $fstream.Read($buffer, 0, $fstream.Length)
+    $fstream.close()
+    return $buffer
+  }
+
+  hidden [byte[]] BufferFromString([string]$message) {
+    return [System.Text.Encoding]::UTF8.GetBytes($message)
+  }
+
   #----------------------------------------------------------------
   # Starts the server on specified port 
   # (If port is in use, the next avaliable port will be used)
@@ -409,23 +481,11 @@ class WebServer {
     function Send-Response {
       param(
         [System.Net.HttpListenerResponse]$res,
-        [string]$message,
-        [string]$path,
+        [byte[]]$buffer,
         [ContentType]$contentType = [ContentType]::textHTML
       )
      
-      try {
-        if ($path) {
-          $path = $path -replace '.*::'
-          $fstream = [System.IO.FileStream]::new($path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read)
-          [byte[]]$buffer = [byte[]]::new($fstream.Length)
-          $fstream.Read($buffer, 0, $fstream.Length)
-          $fstream.close()
-        }
-        else {
-          [byte[]]$buffer = [System.Text.Encoding]::UTF8.GetBytes($message)
-        }
-      
+      try {      
         $res.ContentType = $contentType
         $res.contentLength64 = $buffer.Length
         $output = $res.OutputStream
@@ -440,8 +500,7 @@ class WebServer {
     }
   
     $this.CreateListener()
-      
-
+  
     $this.LoadStaticEndpoints()
     Write-Host "Server started on port $($this.port) (http://localhost:$($this.port))" -ForegroundColor Green
     Write-Host "Avaliable endpoints:"
@@ -473,56 +532,31 @@ class WebServer {
       $req = $context.Request
       $res = $context.Response
 
-      #Write-Host ($req | ConvertTo-Json -Depth 10)
-
       $this.ResetRequest()
-      
-
       $this.LoadStaticEndpoints()
      
-      if ( $req.url -match "$($this.port)/\`$end/?$") { 
-        Send-Response -req $req -res $res -message "Server Closed"
-        $this.Stop()
+      if ( $req.url -match "$($this.port)/\`$end/?$") {
+        Send-Response -req $req -res $res
         return 'Stop'
       }
 
-    
-      
       $urlPath = Join-Path -Path $this.path -ChildPath ($req.url -replace ".*localhost:$($this.port)")
       
-      $ext = if (Test-Path -Path $urlPath) { (Get-Item -Path $urlPath).Extension -replace '\.' }
-      
-      if ($ext) {
-        $item = Get-Item -Path $urlPath 
+      $file = if ((Test-Path -Path $urlPath -PathType Leaf)) { Get-Item -Path $urlPath }
+ 
+      $contentType = [ContentType]::FromExt($file.Extension, $true)
+
+      if ($file) {
         try {
-          $content = (Get-Content $urlPath -errorAction Stop -Encoding UTF8) -join "`n"
-         
-          $contentType = switch ($ext) {
-            'js' { [ContentType]::textJavaScript }
-            'css' { [ContentType]::textCSS }
-            'html' { [ContentType]::textHTML }
-            'png' { [ContentType]::ImagePng }
-            { $_ -match '^jpe?g$' } { [ContentType]::ImageJpeg }
-            'gif' { [ContentType]::ImageGif }
-            'mp3' { [ContentType]::AudioMP3 }
-            'mp4' { [ContentType]::VideoMP4 }
-            'ico' { [ContentType]::ImageIco }
-            'bmp' { [ContentType]::ImageBmp }
-            'svg' { [ContentType]::ImageSVG }
-            Default { [ContentType]::textHTML }
-          }    
+          $content = $this.BufferFromFile($file.FullName)
         }
         catch {
           $res.statusCode = 404
-          $content = "404 - Not Found"
+          $content = $this.BufferFromString("404 - Not Found")
           $contentType = [ContentType]::textHTML
         }
-        if ($contentType -notlike 'text*') {
-          Send-Response -res $res -path $urlPath -contentType $contentType
-        }
-        else {
-          Send-Response -res $res -message $content -contentType $contentType
-        }
+
+        Send-Response -res $res -buffer $content -contentType $contentType
         return
       }
       
@@ -532,12 +566,12 @@ class WebServer {
       $this.Method = $req.HttpMethod
       if (-not $endpoint) {
         $res.statusCode = 404
-        Send-Response -res $res -message "Not Found" 
+        Send-Response -res $res -buffer ($this.BufferFromString("Not Found"))
         return
       }
       if (-not ($req.HttpMethod -in $endpoint.methods)) {
         $res.statusCode = 405
-        Send-Response -res $res -message "Method Not Allowed"
+        Send-Response -res $res -buffer ($this.BufferFromString("Method Not Allowed"))
         return
       }
 
@@ -576,7 +610,12 @@ class WebServer {
           $res.statusCode = $this.request.statusCode
         }
 
-        Send-Response -res $res -message $result
+        if ($result -is [pscustomobject] -or $result -is [hashtable]) {
+          $ContentType = [ContentType]::ApplicationJSON
+          $result = $result | ConvertTo-Json -Compress
+        }
+
+        Send-Response -res $res -buffer $this.BufferFromString($result) -ContentType $ContentType
         return
       }
       catch {
@@ -591,7 +630,7 @@ class WebServer {
         
       }
       
-      Send-Response -res $res -message $message -contentType $ContentType
+      Send-Response -res $res -buffer $this.BufferFromString($message) -contentType $ContentType
     } 
 
     #----------------------------------------------------------------
@@ -602,7 +641,9 @@ class WebServer {
       try {
         $context = $this.listener.GetContext()
         $status = Invoke-Request -context $context
+        Write-Host $status
         if ($status -eq 'Stop') {
+          Write-Host "Server stopped" -ForegroundColor Green
           return
         }
       }
@@ -623,7 +664,6 @@ class WebServer {
   # Starts the WebServer on the Instance's default port
   #----------------------------------------------------------------
   [void]Start() {
-    $this.GetClosestPort($this.port)
     $this.Start($this.port)
   }
 
@@ -632,8 +672,7 @@ class WebServer {
   #----------------------------------------------------------------
 
   [void]Start([int16]$port, [switch]$InBrowser) {
-    $this.GetClosestPort($port)
-    $this.CreateListener()
+    $this.CreateListener($port)
     $this.OpenInBrowser()
     $this.Start($this.port)
   }
@@ -644,7 +683,6 @@ class WebServer {
   #----------------------------------------------------------------
 
   [void]Start([switch]$InBrowser) {
-    $this.GetClosestPort($this.port)
     $this.CreateListener()
     $this.OpenInBrowser()
     $this.Start($this.port)
@@ -658,25 +696,56 @@ class WebServer {
     if (-not $this.listener.IsListening) {
       Write-Host "Server is not running" -ForegroundColor Yellow
       return
-    }  
+    }
+
     $this.listener.Stop()
     $this.listener.Close()
+    $this.listener = $null
+
+    if ($this.appModePid -and (Get-Process -Id $this.appModePid -ErrorAction SilentlyContinue)) {
+      try {
+        Stop-Process -Id $this.appModePid -ErrorAction Stop
+      }
+      catch {
+        Write-Host "Failed to close browser window: $_" -ForegroundColor Red
+      }
+    }
+
+    if ($this.pswsTempDir -and (Test-Path -Path $this.pswsTempDir)) {
+      Start-Sleep -Milliseconds 10 # Give the browser some time to close and release the temp directory
+      try {
+        Remove-Item -Path $this.pswsTempDir -Recurse -Force
+      }
+      catch {
+        Write-Host "Failed to remove temporary files: $_" -ForegroundColor Red
+      }
+    }
   }
 
   
   #----------------------------------------------------------------
   # Script for creating a new browser-window
   #----------------------------------------------------------------
+
   [void] hidden OpenInBrowser() {
     try {
+      $_currentPid = [System.Diagnostics.Process]::GetCurrentProcess().Id
+      $_pswsTempDir = Join-Path -Path $env:TEMP -ChildPath "PSWS_$(Get-Random 10000)"
+      $_appModePid = (Start-Process -FilePath (Get-ItemProperty -ErrorAction Stop -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe\')."(default)" -ArgumentList "--app=http://localhost:$($this.port)", "--user-data-dir=$($_pswsTempDir)", '--disable-extensions' -PassThru).Id
+      $this.pswsTempDir = $_pswsTempDir
+      $this.appModePid = $_appModePid
       Start-Job -ScriptBlock {
-        param($port)
-        Start-Process -FilePath (Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe\')."(default)" -ArgumentList "--app=http://localhost:$($port)"
-      } -ArgumentList $this.port
-    }
-    catch {}
-  }
+        (Get-Process -Id $using:_appModePid).WaitForExit()
+        $url = $using:this.listener.Prefixes | Select-Object -First 1
+        Invoke-RestMethod -Uri "$url/`$end" -Method 'POST'
+      }
 
+      Start-Process powershell.exe -ArgumentList "-NoProfile -WindowStyle Hidden -Command & {(Get-Process -Id $_currentPid).WaitForExit(); (Get-Process -id $_appModePid).Kill(); Remove-Item -Path $this.pswsTempDir -Recurse -Force}"
+    }
+    catch {
+      Write-Host "Failed to open browser window: $_" -ForegroundColor Red
+    }
+  }
 }
 
 #----------------------------------------------------------------
