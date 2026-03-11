@@ -610,7 +610,7 @@ class WebServer {
           $res.statusCode = $this.request.statusCode
         }
 
-        if ($result -is [pscustomobject] -or $result -is [hashtable]) {
+        if (-not ($result -is [string])) {
           $ContentType = [ContentType]::ApplicationJSON
           $result = $result | ConvertTo-Json -Compress
         }
