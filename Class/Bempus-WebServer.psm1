@@ -13,89 +13,138 @@ Class Request {
 }
 Class ContentType {
   hidden [string]$value
+
   static [string]$TextPlain = "text/plain"
   static [string]$TextHTML = "text/html"
-  static [string]$TextJavaScript = "text/javascript"
   static [string]$TextCSS = "text/css"
   static [string]$TextCSV = "text/csv"
+  static [string]$TextJavascript = "text/javascript"
+  static [string]$TextXML = "text/xml"
+  static [string]$TextMarkdown = "text/markdown"
+
   static [string]$ApplicationJSON = "application/json"
-  static [string]$ApplicationGZIP = "application/gzip"
-  static [string]$ApplicationZIP = "application/zip"
-  static [string]$AudioMidi = "audio/midi"
-  static [string]$AudioMP3 = "audio/mpeg"
-  static [string]$VideoMP4 = "video/mp4"
-  static [string]$videoWEBM = "video/webm"
-  static [string]$ImagePng = "image/png"
-  static [string]$ImageJpeg = "image/jpeg"
-  static [string]$ImageGif = "image/gif"
-  static [string]$ImageBmp = "image/bmp"
-  static [string]$ImageIco = "image/vnd.microsoft.icon"
-  static [string]$ImageSVG = "image/svg+xml"
-  static [string]$FontWoff = "font/woff" 
-  static [string]$FontWoff2 = "font/woff2" 
+  static [string]$ApplicationXML = "application/xml"
+  static [string]$ApplicationPDF = "application/pdf"
+  static [string]$ApplicationZip = "application/zip"
+  static [string]$ApplicationGzip = "application/gzip"
+  static [string]$ApplicationOctetStream = "application/octet-stream"
+  static [string]$ApplicationXhtml = "application/xhtml+xml"
+  static [string]$ApplicationSql = "application/sql"
+  static [string]$ApplicationWasm = "application/wasm"
+
+  static [string]$ImgPng = "image/png"
+  static [string]$ImgJpeg = "image/jpeg"
+  static [string]$ImgGif = "image/gif"
+  static [string]$ImgWebp = "image/webp"
+  static [string]$ImgSvg = "image/svg+xml"
+  static [string]$ImgBmp = "image/bmp"
+  static [string]$ImgIco = "image/vnd.microsoft.icon"
+  static [string]$ImgTiff = "image/tiff"
+
+  static [string]$AudioMpeg = "audio/mpeg"
+  static [string]$AudioOgg = "audio/ogg"
+  static [string]$AudioWav = "audio/wav"
+  static [string]$AudioWebm = "audio/webm"
+  static [string]$AudioAac = "audio/aac"
+  static [string]$VideoMp4 = "video/mp4"
+  static [string]$VideoWebm = "video/webm"
+  static [string]$VideoOgg = "video/ogg"
+  static [string]$VideoMpeg = "video/mpeg"
+  static [string]$VideoQuicktime = "video/quicktime"
+
+  static [string]$MsWord = "application/msword"
+  static [string]$MsWordDocx = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  static [string]$MsExcel = "application/vnd.ms-excel"
+  static [string]$MsExcelXlsx = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  static [string]$MsPowerpoint = "application/vnd.ms-powerpoint"
+  static [string]$MsPowerpointPptx = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+
+  static [string]$FontWoff = "font/woff"
+  static [string]$FontWoff2 = "font/woff2"
+  static [string]$FontTtf = "font/ttf"
+  static [string]$FontOtf = "font/otf"
 
 
-  ContentType([string]$value) {
+  ContentType([string] $value) {
     $this.Value = $value
   }
-  static [ContentType] AsType([string] $value) {
-    return $value
-  }
   
+  static [ContentType] FromExt([string]$ext, [bool]$allowDefault) { 
+    $ct = switch ($ext.TrimStart('.')) {
 
-  static [ContentType] FromExt([string]$ext, [bool]$allowDefault) {
-    $ext = $ext -replace '^\.', ''
-    $ct = switch ($ext) {
-      'js' { [ContentType]::textJavaScript }
-      'css' { [ContentType]::textCSS }
-      'html' { [ContentType]::textHTML }
-      'png' { [ContentType]::ImagePng }
-      { $_ -match '^jpe?g$' } { [ContentType]::ImageJpeg }
-      'gif' { [ContentType]::ImageGif }
-      'mp3' { [ContentType]::AudioMP3 }
-      'mp4' { [ContentType]::VideoMP4 }
-      'ico' { [ContentType]::ImageIco }
-      'bmp' { [ContentType]::ImageBmp }
-      'svg' { [ContentType]::ImageSVG }
-      Default { 
+      'html' { [ContentType]::TextHTML }
+      'htm' { [ContentType]::TextHTML }
+      'txt' { [ContentType]::TextPlain }
+      'css' { [ContentType]::TextCSS }
+      'js' { [ContentType]::TextJavascript }
+      'mjs' { [ContentType]::TextJavascript }
+      'csv' { [ContentType]::TextCSV }
+      'xml' { [ContentType]::TextXML }
+      'md' { [ContentType]::TextMarkdown }
+
+      'json' { [ContentType]::AppJSON }
+      'pdf' { [ContentType]::AppPDF }
+      'zip' { [ContentType]::AppZip }
+      'gz' { [ContentType]::AppGzip }
+      'xhtml' { [ContentType]::AppXhtml }
+      'sql' { [ContentType]::AppSql }
+      'wasm' { [ContentType]::AppWasm }
+
+      'png' { [ContentType]::ImgPng }
+      { $_ -match 'jpe?g' } { [ContentType]::ImgJpeg }
+      'gif' { [ContentType]::ImgGif }
+      'webp' { [ContentType]::ImgWebp }
+      'svg' { [ContentType]::ImgSvg }
+      'ico' { [ContentType]::ImgIco }
+      'bmp' { [ContentType]::ImgBmp }
+      { $_ -match 'tiff?' } { [ContentType]::ImgTiff }
+  
+      'mp3' { [ContentType]::AudioMpeg }
+      'wav' { [ContentType]::AudioWav }
+      { $_ -match 'og[ag]' } { [ContentType]::AudioOgg }
+      'weba' { [ContentType]::AudioWebm }
+      'aac' { [ContentType]::AudioAac }
+
+      'mp4' { [ContentType]::VideoMp4 }
+      'webm' { [ContentType]::VideoWebm }
+      'ogv' { [ContentType]::VideoOgg }
+      'mpeg' { [ContentType]::VideoMpeg }
+      'mov' { [ContentType]::VideoQuicktime }
+
+      'doc' { [ContentType]::MsWord }
+      'docx' { [ContentType]::MsWordDocx }
+      'xls' { [ContentType]::MsExcel }
+      'xlsx' { [ContentType]::MsExcelXlsx }
+      'ppt' { [ContentType]::MsPowerpoint }
+      'pptx' { [ContentType]::MsPowerpointPptx }
+
+      'woff' { [ContentType]::FontWoff }
+      'woff2' { [ContentType]::FontWoff2 }
+      'ttf' { [ContentType]::FontTtf }
+      'otf' { [ContentType]::FontOtf }
+
+      default {
         if (-not $allowDefault) {
-          throw """$ext"" is not a valid extension"
+          throw "Unknown file extension: $ext"
         }
-        [ContentType]::textHTML 
+        [ContentType]::AppOctetStream
       }
     }
     return $ct
   }
+  
   static [ContentType] FromExt([string]$ext) {
     return [ContentType]::FromExt($ext, $false)
   }
 
   [string] ToString() {
-    $allowedList = @(
-      "text/plain",
-      "text/html",
-      "text/javascript",
-      "text/css",
-      "text/csv",
-      "application/json",
-      "application/gzip",
-      "application/zip",
-      "audio/mpeg"
-      "video/webm",
-      "video/mp4",
-      "image/png",
-      "image/jpeg",
-      "image/gif",
-      "image/bmp",
-      "image/vnd.microsoft.icon",
-      "image/svg+xml",
-      "application/gzip",
-      "font/woff",
-      "font/woff2"
-    )
 
+    $allowedList = [ContentType] | Get-Member -Static -MemberType Property | ForEach-Object {
+      [ContentType]::($_.Name)
+    }
+    
     if ($this.value -notin $allowedList) {
-      throw """$($this.Value)"" is not a valid ContentType. Valid values:`n$($allowedList -join "`n" )"
+      throw "'$($this.Value)' is not a valid ContentType."
     }
     return $allowedList | Where-Object { $_ -eq $this.value }
   }
