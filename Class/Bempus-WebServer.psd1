@@ -12,13 +12,13 @@
     RootModule        = 'WebServer.psm1'
 
     # Version number of this module.
-    ModuleVersion     = '1.1.1'
+    ModuleVersion     = '2.0.0'
 
     # Supported PSEditions
     # CompatiblePSEditions = @()
 
     # ID used to uniquely identify this module
-    GUID              = '9527a727-fbdf-4a3b-9417-c74cea79cd40'
+    GUID              = '0e056452-6768-427c-a443-21548d71acdd'
 
     # Author of this module
     Author            = 'Bempus'
@@ -57,7 +57,7 @@
     # RequiredAssemblies = @()
 
     # Script files (.ps1) that are run in the caller's environment prior to importing this module.
-    #ScriptsToProcess = @()
+    # ScriptsToProcess = @()
 
     # Type files (.ps1xml) to be loaded when importing this module
     # TypesToProcess = @()
@@ -87,7 +87,7 @@
     # ModuleList = @()
 
     # List of all files packaged with this module
-    #FileList = @()
+    # FileList = @()
 
     # Private data to pass to the module specified in RootModule/ModuleToProcess. This may also contain a PSData hashtable with additional module metadata used by PowerShell.
     PrivateData       = @{

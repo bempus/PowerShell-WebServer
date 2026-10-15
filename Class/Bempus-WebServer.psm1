@@ -1,3 +1,9 @@
+$modulePaths = $env:PSModulePath -split ';'
+$webModulePath = "$PSScriptRoot/Modules"
+if ($modulePaths -notcontains $webModulePath) {
+  $env:PSModulePath = ($modulePaths + $webModulePath) -join ';'
+}
+
 class ContentType {
   hidden [string]$value
 
@@ -123,13 +129,12 @@ class ContentType {
   static [ContentType] FromExt([string]$ext) {
     return [ContentType]::FromExt($ext, $false)
   }
-
+  
   static [ContentType] FromUrl([string]$url) {
     $ext = $url | Select-String -Pattern '\..{2,4}$' | Select-Object -ExpandProperty Matches -First 1
     if (-not $ext.value) { return [ContentType]::textHTML }
     return [ContentType]::FromExt($ext.value, $true)
   }
-
 
   [string] ToString() {
 
@@ -489,6 +494,7 @@ class WebServer {
 
 
 function New-WebServer {
+
   param(
     [int16]$port = 3000, 
     [string]$path, 
@@ -637,4 +643,26 @@ function Register-backgroundScript {
   )
     
   $webserver.RegisterBackgroundScript($scriptBlock)
-}
+
+  param([int]$port = 3000, [string]$path, [string]$titlePrefix, [char]$titleDelimiter, [switch]$autoStart, [switch]$autoStartInBrowser)
+
+  $ws = [WebServer]::new()
+  $ws.SetPort($port)
+  if ($path) {
+    $ws.SetPath($path)
+  }
+  if ($titlePrefix -and $titleDelimiter) {
+    $ws.SetTitlePrefix($titlePrefix, $titleDelimiter)
+  }
+  
+  if ($autoStart) {
+    $ws.Start()
+    return
+  }
+
+  if ($autoStartInBrowser) {
+    $ws.Start($true)
+    return
+  }
+
+  return $ws
