@@ -643,26 +643,4 @@ function Register-backgroundScript {
   )
     
   $webserver.RegisterBackgroundScript($scriptBlock)
-
-  param([int]$port = 3000, [string]$path, [string]$titlePrefix, [char]$titleDelimiter, [switch]$autoStart, [switch]$autoStartInBrowser)
-
-  $ws = [WebServer]::new()
-  $ws.SetPort($port)
-  if ($path) {
-    $ws.SetPath($path)
-  }
-  if ($titlePrefix -and $titleDelimiter) {
-    $ws.SetTitlePrefix($titlePrefix, $titleDelimiter)
-  }
-  
-  if ($autoStart) {
-    $ws.Start()
-    return
-  }
-
-  if ($autoStartInBrowser) {
-    $ws.Start($true)
-    return
-  }
-
-  return $ws
+}
