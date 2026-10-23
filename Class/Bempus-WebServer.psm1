@@ -1,9 +1,4 @@
-$modulePaths = $env:PSModulePath -split ';'
-$webModulePath = "$PSScriptRoot/Modules"
-if ($modulePaths -notcontains $webModulePath) {
-  $env:PSModulePath = ($modulePaths + $webModulePath) -join ';'
-}
-
+$webservers = [System.Collections.ArrayList]::new()
 class ContentType {
   hidden [string]$value
 
@@ -129,12 +124,13 @@ class ContentType {
   static [ContentType] FromExt([string]$ext) {
     return [ContentType]::FromExt($ext, $false)
   }
-  
+
   static [ContentType] FromUrl([string]$url) {
     $ext = $url | Select-String -Pattern '\..{2,4}$' | Select-Object -ExpandProperty Matches -First 1
     if (-not $ext.value) { return [ContentType]::textHTML }
     return [ContentType]::FromExt($ext.value, $true)
   }
+
 
   [string] ToString() {
 
@@ -157,23 +153,23 @@ enum Method {
   DELETE
 }
 class WebServer {
-  # Public State
-  [bool] $isDisposed = $false
-
+    
+    
   # Core Infrastructure
-  hidden [System.Net.HttpListener]                             $listener = [System.Net.HttpListener]::new()
-  hidden [int16]                                               $port = 9001
-  hidden [string]                                              $basePath = ((Get-Location).ProviderPath)
-  hidden [System.Management.Automation.Runspaces.RunspacePool] $pool = $null
-  hidden [System.Collections.Generic.List[scriptblock]]        $backgroundScripts = [System.Collections.Generic.List[scriptblock]]::new()
+  hidden [bool]                                                $h_isDisposed = $false
+  hidden [System.Net.HttpListener]                             $h_listener = [System.Net.HttpListener]::new()
+  hidden [int16]                                               $h_port = 9001
+  hidden [string]                                              $h_basePath = ((Get-Location).ProviderPath)
+  hidden [System.Management.Automation.Runspaces.RunspacePool] $h_pool = $null
+  hidden [System.Collections.Generic.List[scriptblock]]        $h_backgroundScripts = [System.Collections.Generic.List[scriptblock]]::new()
 
   # State & Data Collections
-  hidden [hashtable]                                           $endpoints = [hashtable]::new()
-  hidden [hashtable]                                           $store = [hashtable]::new()
-  hidden [System.Collections.Generic.List[object]]             $jobs = $null
+  hidden [hashtable]                                           $h_endpoints = [hashtable]::new()
+  hidden [hashtable]                                           $h_store = [hashtable]::new()
+  hidden [System.Collections.Generic.List[object]]             $h_jobs = $null
 
   # File System & Temp Storage
-  hidden [string]                                              $pswsTempDir = $null
+  hidden [string]                                              $h_pswsTempDir = $null
     
 
 
@@ -182,15 +178,15 @@ class WebServer {
   }
 
   WebServer([string]$basePath) {
-    $this.SetWebserver($this.port, $basePath)
+    $this.SetWebserver($this.h_port, $basePath)
   }
 
   WebServer([int16]$port) {
-    $this.SetWebserver($port, $this.basePath)
+    $this.SetWebserver($port, $this.h_basePath)
   }
 
   WebServer() {
-    $this.SetWebserver($this.port, $this.basePath)
+    $this.SetWebserver($this.h_port, $this.h_basePath)
   }
 
   [void]SetWebserver([int16]$port, [string]$basePath) {
@@ -200,18 +196,23 @@ class WebServer {
     }
        
 
-    $this.port = $port
+    $this.h_port = $port
     if ($basePath) {
       $this.setRoot($basePath)
     }
 
-    $this.pool = [runspacefactory]::CreateRunspacePool(1, 10)
-    $this.pool.Open()
-    $this.jobs = [System.Collections.Generic.List[object]]::new()
+    $this.h_pool = [runspacefactory]::CreateRunspacePool(1, 10)
+    $this.h_pool.Open()
+    $this.h_jobs = [System.Collections.Generic.List[object]]::new()
 
         
-    $this.GetClosestPort($this.port)
+    $this.GetClosestPort($this.h_port)
     $this.CreateListener()
+
+    $this.PSObject.Properties.Add(([psscriptproperty]::new('AppRoot', { $this.h_basePath })))
+    $this.PSObject.Properties.Add(([psscriptproperty]::new('Port', { $this.h_port })))
+    $this.PSObject.Properties.Add(([psscriptproperty]::new('BackgroundScripts', { $this.h_backgroundScripts })))
+    $this.PSObject.Properties.Add(([psscriptproperty]::new('Disposed', { $this.h_isDisposed })))
   }
 
 
@@ -220,19 +221,19 @@ class WebServer {
       Write-Error -Message "No folder with the name of '$($path)'"
       return 
     }
-    $this.basePath = (Get-Item -Path $path).FullName
+    $this.h_basePath = (Get-Item -Path $path).FullName
   }
 
   [void]setPort([int16]$port) {
-    if ($this.port -eq $port) {
+    if ($this.h_port -eq $port) {
       Write-Host "Port is already set to $port, skipping"
       return
     }
-    $this.port = $port
+    $this.h_port = $port
   }
 
   [void]RegisterBackgroundScript([scriptblock]$scriptBlock) {
-    $this.backgroundScripts.Add($scriptBlock)
+    $this.h_backgroundScripts.Add($scriptBlock)
   }
 
 
@@ -243,33 +244,33 @@ class WebServer {
         $port++
       }
     }
-    if ($this.port -ne $port) {
-      $this.port = $port
+    if ($this.h_port -ne $port) {
+      $this.h_port = $port
       Write-Host "New port: $port"
     }
   }
 
   [void] hidden GetClosestPort() {
-    $this.GetClosestPort($this.port)
+    $this.GetClosestPort($this.h_port)
   }
 
   [int16]FindAndSetClosestPort() {
     $this.GetClosestPort()
-    return $this.port
+    return $this.h_port
   }
 
 
   [hashtable] GetEndpoint([string]$name) {
     $name = $name -replace '^/?', '/'
-    if (-not $this.endpoints.$name) {
+    if (-not $this.h_endpoints.$name) {
       return $null
     }
-    return $this.endpoints.$name
+    return $this.h_endpoints.$name
   }
 
   [void] SetEndpoint([string]$name, [scriptblock]$callBack, [Method[]]$methods, [string]$contentType) {
     $name = $name -replace '^/?', '/'
-    $this.endpoints.$name = @{
+    $this.h_endpoints.$name = @{
       callback    = $callBack
       methods     = $methods
       ContentType = $contentType
@@ -280,14 +281,14 @@ class WebServer {
 
   [void] ListEndpoints([string]$type, [bool]$includeStatic) {
 
-    $files = Get-ChildItem -Path $this.basePath -Recurse -File
+    $files = Get-ChildItem -Path $this.h_basePath -Recurse -File
         
     $staticFiles = @()
     $pages = @()
     $api = @()
 
     foreach ($file in $files) {
-      $relativePath = $file.FullName -replace [Regex]::Escape($this.basePath) -replace '\\', '/'
+      $relativePath = $file.FullName -replace [Regex]::Escape($this.h_basePath) -replace '\\', '/'
       if ($relativePath -match "^/Pages/.*\.html?$") {
         $pages += $relativePath -replace '/Pages(.*?)(?:index)?\.html?$', '$1'
         continue
@@ -299,7 +300,7 @@ class WebServer {
       $staticFiles += $relativePath
     }
         
-    foreach ($key in $this.endpoints.Keys) {
+    foreach ($key in $this.h_endpoints.Keys) {
       if ($key -match '^/API/.*ps[me]?1') {
         $api += $key
         continue
@@ -347,11 +348,11 @@ class WebServer {
     $req = $context.Request
     $newRequest = @{
       context   = $context
-      store     = $this.store
+      store     = $this.h_store
       query     = @{}
       body      = @{}
-      endpoints = $this.endpoints
-      basePath  = (Get-Item $this.basePath).FullName
+      endpoints = $this.h_endpoints
+      basePath  = (Get-Item $this.h_basePath).FullName
       #ContentType = [ContentType]::FromUrl($context.Request.Url.AbsolutePath).ToString()
     }  
 
@@ -368,18 +369,18 @@ class WebServer {
   }
 
   [void]CreateListener() {
-    if (!$this.listener.IsListening) {
-      $this.listener.Prefixes.Add("http://localhost:$($this.port)/")
+    if (!$this.h_listener.IsListening) {
+      $this.h_listener.Prefixes.Add("http://localhost:$($this.h_port)/")
     }
   }
     
   [void] hidden InvokeRequest($requestInfo) {
     $requestJob = . "$PSScriptRoot/requestJob.ps1"
     $ps = [powershell]::Create()
-    $ps.RunspacePool = $this.pool
+    $ps.RunspacePool = $this.h_pool
     $ps.AddScript($requestJob).AddParameter('requestInfo', $requestInfo) | Out-Null
     $async = $ps.BeginInvoke()
-    $this.jobs.Add([PSCustomObject]@{
+    $this.h_jobs.Add([PSCustomObject]@{
         PS    = $ps
         Async = $async
       })        
@@ -388,8 +389,8 @@ class WebServer {
   [void]Start() {
 
     try {
-      $this.listener.Start()
-      if ($this.isDisposed) {
+      $this.h_listener.Start()
+      if ($this.h_isDisposed) {
         throw [ObjectDisposedException]::new([WebServer].Name)
         return
       }
@@ -397,10 +398,10 @@ class WebServer {
       $_Host = Get-Host
       [System.Console]::TreatControlCAsInput = $true
 
-      Write-Host "Server started on http://localhost:$($this.port)/" -ForegroundColor Green
+      Write-Host "Server started on http://localhost:$($this.h_port)/" -ForegroundColor Green
 
-      while ($this.listener.IsListening) {
-        $contextTask = $this.listener.GetContextAsync()
+      while ($this.h_listener.IsListening) {
+        $contextTask = $this.h_listener.GetContextAsync()
         while (-not $contextTask.AsyncWaitHandle.WaitOne(200)) {
                     
           if ($_Host.UI.RawUI.KeyAvailable) {
@@ -408,7 +409,7 @@ class WebServer {
                         
             switch ($key.VirtualKeyCode) {
               67 {
-                $this.listener.stop()
+                $this.h_listener.stop()
               }
               76 {
                 $this.ListEndpoints()
@@ -416,13 +417,13 @@ class WebServer {
             }
           }
 
-          foreach ($script in $this.backgroundScripts) {
+          foreach ($script in $this.h_backgroundScripts) {
             try {
-              . $script -store $this.store -root $this.basePath
+              . $script -store $this.h_store -root $this.h_basePath
             }
             catch {}
           }
-          foreach ($job in $this.jobs | Where-Object { $_.Async.IsCompleted } ) {
+          foreach ($job in $this.h_jobs | Where-Object { $_.Async.IsCompleted } ) {
             $result = $job.ps.EndInvoke($job.Async)
             if ($result -eq 'STOP') {
               $this.Dispose()
@@ -430,14 +431,14 @@ class WebServer {
             }
 
             if ($result) {
-              write-host $result
+              Write-Host $result
             }
     
-            [void]$this.jobs.Remove($job)
+            [void]$this.h_jobs.Remove($job)
           }
         }
         
-        if (-not $this.listener.IsListening) {
+        if (-not $this.h_listener.IsListening) {
           return
         }
         $context = $contextTask.GetAwaiter().GetResult()
@@ -451,20 +452,57 @@ class WebServer {
     }
   }
 
+  #----------------------------------------------------------------
+  # Starts the WebServer on specified port and opens Edge in app-mode
+  #----------------------------------------------------------------
+
+  [void]Start([int16]$port, [switch]$InBrowser) {
+    $this.GetClosestPort($port)
+    $this.OpenInBrowser()
+  }
+
+
+  #----------------------------------------------------------------
+  # Starts the WebServer on the Instance's default port and opens Edge in app-mode
+  #----------------------------------------------------------------
+
+  [void]Start([switch]$InBrowser) {
+    $this.GetClosestPort($this.h_port)
+    $this.OpenInBrowser()
+  }
+
+  [void] hidden OpenInBrowser() {
+    try {
+      $_currentPid = [System.Diagnostics.Process]::GetCurrentProcess().Id
+      $_pswsTempDir = Join-Path -Path $env:TEMP -ChildPath "PSWS_$(Get-Random 10000)"
+      $_appModePid = (Start-Process -FilePath (Get-ItemProperty -ErrorAction Stop -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe\')."(default)" -ArgumentList "--app=http://localhost:$($this.h_port)", "--user-data-dir=$($_pswsTempDir)", '--disable-extensions' -PassThru).Id
+      $this.h_pswsTempDir = $_pswsTempDir
+      Start-Job -ScriptBlock {
+        (Get-Process -Id $using:_appModePid).WaitForExit()
+        $url = $using:this.listener.Prefixes | Select-Object -First 1
+        Invoke-RestMethod -Uri "$url/`$end" -Method 'POST'
+      }
+
+      Start-Process powershell.exe -ArgumentList "-NoProfile -WindowStyle Hidden -Command & {(Get-Process -Id $_currentPid).WaitForExit(); (Get-Process -id $_appModePid).Kill(); Remove-Item -Path $this.h_pswsTempDir -Recurse -Force}"
+    }
+    catch {
+      Write-Host "Failed to open browser window: $_" -ForegroundColor Red
+    }
+  }
 
 
   [void]Close() {
-    $this.listener.Close()
+    $this.h_listener.Close()
   }
 
   [void]Dispose() {
     $this.close()
-    $this.listener.Dispose()
-    foreach ($job in $this.jobs) {
+    $this.h_listener.Dispose()
+    foreach ($job in $this.h_jobs) {
       $job.Dispose()
     }
-    $this.pool.Dispose()
-    $this.isDisposed = $true
+    $this.h_pool.Dispose()
+    $this.h_isDisposed = $true
   }
 }
 
@@ -494,7 +532,6 @@ class WebServer {
 
 
 function New-WebServer {
-
   param(
     [int16]$port = 3000, 
     [string]$path, 
@@ -507,7 +544,8 @@ function New-WebServer {
 
 
   $ws = [WebServer]::new($port)
-        
+    
+  [void]$webservers.Add($ws)
         
   if ($path) {
     $ws.SetRoot($path)
@@ -527,6 +565,37 @@ function New-WebServer {
   return $ws
 }
 
+<#
+.SYNOPSIS
+  Returns a list of all WebServer instances
+.DESCRIPTION
+  Returns a list of all WebServer instances, optionally filtered by disposed state
+#>
+
+function Get-WebServers {
+  param([switch]$Disposed)
+
+  $webservers | Where-Object {
+    $_.Disposed -like $Disposed
+  }
+
+}
+
+<#
+.SYNOPSIS
+  Starts a WebServer instance
+.DESCRIPTION
+  Starts a WebServer instance, optionally running it as an application with a headless browser
+.EXAMPLE
+  $ws | Start-WebServer -asApp -autoDispose
+  Starts the WebServer instance as an application with a headless browser and disposes the WebServer when the Edge window is closed or the process is terminated
+.EXAMPLE
+  $ws | Start-WebServer -autoDispose
+  Starts the WebServer instance on the specified port, and disposes the WebServer when the process is terminated
+.EXAMPLE
+  $ws | Start-WebServer
+  Starts the WebServer instance on the specified port, and keeps it running until disposed via $ws.Dispose()
+#>
 function Start-WebServer {
   param (
     [Parameter(ValueFromPipeline)]
@@ -573,11 +642,45 @@ function Start-WebServer {
   [System.Console]::TreatControlCAsInput = $TreatControlCAsInput
   return $webserver
 
-  
-
 }
 
+<#
+.SYNOPSIS
+  Removes a WebServer instance
+.DESCRIPTION
+  Removes a WebServer instance and disposes it
+.EXAMPLE
+  $ws | Remove-WebServer
+  Removes the WebServer instance and disposes it
+#>
+function Remove-WebServer {
+  param(
+    [Parameter(ValueFromPipeline)]
+    [WebServer[]]$webserver
+  )
+  
+  process {
+    foreach ($server in $webserver) {
+      $server.Dispose()
+    }
+  }
+}
 
+<#
+.SYNOPSIS
+  Adds an endpoint to the WebServer
+.DESCRIPTION
+  Adds an endpoint to the WebServer with the specified name and callback
+.EXAMPLE
+  $ws | Add-Endpoint -name "test" -callBack { param($query, $body, $method, $store, $request, $basePath) Write-Host "Query: $($query.test), Method used: $($method)" }
+  Adds a new endpoint named "test" with the specified callback that writes the query value of "test" and the method used to the console
+.EXAMPLE
+  $ws | Add-Endpoint -name "test" -callBack { return "<html><body><h1>Test Endpoint</h1></body></html>" } -methods "GET", "POST"
+  Adds a new endpoint named "test" with the specified callback that returns a simple HTML response, and allows only GET and POST methods
+.EXAMPLE
+  $ws | Add-Endpoint -name "test" -callBack { return "<html><body><h1>Test Endpoint</h1></body></html>" } -methods "GET", "POST" -ContentType [ContentType]::TextHTML
+  Adds a new endpoint named "test" with the specified callback that returns a simple HTML response, allows only GET and POST methods, and sets the Content-Type header to text/html
+#>
 function Add-Endpoint {
   param(
     [Parameter(ValueFromPipeline)]
@@ -594,6 +697,16 @@ function Add-Endpoint {
   return $webserver.SetEndpoint($name, $callBack, $methods, $ContentType)
 }
 
+
+<#
+.SYNOPSIS
+  Updates an existing endpoint on the WebServer
+.DESCRIPTION
+  Updates an existing endpoint on the WebServer with the specified name and callback
+.EXAMPLE
+  $ws | Update-Endpoint -name "test" -callBack { return "Updated test endpoint called" }
+  Updates the endpoint named "test" with the specified callback
+#>
 function Update-Endpoint {
   param(
     [Parameter(ValueFromPipeline)]
@@ -609,7 +722,7 @@ function Update-Endpoint {
   if (-not $endpoint) { Write-Warning "Endpoint with name '$name' does not exist on this WebServer, use Add-Endpoint instead" }
 
   if ($callBack) {
-    $endpoint.callback = $callback
+    $endpoint.callback = $callBack
   }
 
   if ($methods) {
@@ -621,6 +734,21 @@ function Update-Endpoint {
   }
 }
 
+<#
+.SYNOPSIS
+  Lists all endpoints on the WebServer
+.DESCRIPTION
+  Lists all endpoints on the WebServer, optionally filtering by type (API, Pages, All) and including static files (e.g. images, CSS, JS)
+.EXAMPLE
+  $ws | Show-Endpoints
+  Shows all endpoints on the WebServer
+.EXAMPLE
+  $ws | Show-Endpoints -type "API"
+  Shows only API endpoints on the WebServer
+.EXAMPLE
+  $ws | Show-Endpoints -includeStaticFiles
+  Shows all endpoints on the WebServer, including static files
+#>
 function Show-Endpoints {
   param (
     [Parameter(ValueFromPipeline, Mandatory)]
@@ -634,8 +762,16 @@ function Show-Endpoints {
 
 }
 
-
-function Register-backgroundScript {
+<#
+.SYNOPSIS
+  Registers a background script to be executed on the WebServer
+.DESCRIPTION
+  Registers a background script that will be executed on the WebServer
+.EXAMPLE
+  $ws | Register-BackgroundScript -scriptBlock { return "Background script executed" }
+  Registers a background script that will be executed on the WebServer
+#>
+function Register-BackgroundScript {
   param (
     [Parameter(ValueFromPipeline)]
     [WebServer]$webserver,
