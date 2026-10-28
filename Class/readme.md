@@ -336,9 +336,11 @@ The request execution script processes requests in the following order:
 
 3. **HTML Pages**: Looks inside a `Pages\` subfolder for `.html` or `.htm` files matching the requested route (supporting directory indexes automatically).
 
-4. **Dynamic API Scripts**: Looks for `.ps1`, `.psm1`, or `.pse1` files to execute dynamically.
+4. **HTML Template Pages** Same as **HTML Pages** but with extension `.pshtml` or `.pshtm` and powershell code will be parsed as a here-string with the same variables exposed as API-parameters.
 
-5. **404 Fallback**: Triggers the `/404` endpoint, `404.html`, or `404.ps1` if no matching route is found.
+5. **Dynamic API Scripts**: Looks for `.ps1`, `.psm1`, or `.pse1` files to execute dynamically.
+
+6. **404 Fallback**: Triggers the `/404` endpoint, `404.html`, or `404.ps1` if no matching route is found.
 
 # File Examples
 
@@ -356,6 +358,33 @@ The request execution script processes requests in the following order:
     <h1>About Our PowerShell Web Server</h1>
     <p>This static page is automatically served from the Pages directory.</p>
 </body>
+</html>
+
+```
+
+### Example PSHTML Page (`C:\Website\Pages\loop.pshtml`)
+
+```
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>About Us</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+
+<body>
+  <h1>Looping 1-10</h1>
+  <ul>
+    $(foreach($i in 1..10){
+    @"
+    <li>$i</li>
+    "@
+    })
+  </ul>
+</body>
+
 </html>
 
 ```

@@ -109,6 +109,21 @@ return { param($requestInfo)
       return Get-Content -Path $pageItem -Raw -Encoding UTF8
     }
 
+    $pageTemplateItem = Get-WebPathItem -path $requestInfo.basePath -endpoint "$($context.Request.Url.AbsolutePath)" -extentions 'pshtml', 'pshtm' -isPage
+    if ($pageTemplateItem) {
+      $script:encoding = [System.Text.Encoding]::UTF8
+
+      $body = $requestInfo.body 
+      $query = $requestInfo.query 
+      $method = $Context.Request.HttpMethod  
+      $store = $requestInfo.store 
+      $basePath = $requestInfo.basePath
+    
+      $template = (Get-Content -Path $pageTemplateItem -Encoding UTF8 -Raw) -replace '\n[ \t]+"@', "`n`"@"
+
+      return $ExecutionContext.InvokeCommand.ExpandString($template)
+    }
+
 
     $apiItem = Get-WebPathItem -path $requestInfo.basePath -endpoint "$($context.Request.Url.AbsolutePath)" -extentions 'ps1', 'psm1', 'pse1'
     if ($apiItem) {

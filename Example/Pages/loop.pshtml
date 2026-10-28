@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>About Us</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+
+<body>
+  <h1>Looping 1-10</h1>
+  <ul>
+    $(foreach($i in 1..10){
+    @"
+    <li>$i</li>
+    "@
+    })
+  </ul>
+</body>
+
+</html>
