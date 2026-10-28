@@ -8,6 +8,8 @@
   - Added async reqeusts and soft closing
   - Rewritten most of the code base
   - Extracted the request into separate file for readability
+- 2.1
+  - Added SSR support via pshtml
 
 ## Why?
 
