@@ -452,44 +452,6 @@ class WebServer {
     }
   }
 
-  #----------------------------------------------------------------
-  # Starts the WebServer on specified port and opens Edge in app-mode
-  #----------------------------------------------------------------
-
-  [void]Start([int16]$port, [switch]$InBrowser) {
-    $this.GetClosestPort($port)
-    $this.OpenInBrowser()
-  }
-
-
-  #----------------------------------------------------------------
-  # Starts the WebServer on the Instance's default port and opens Edge in app-mode
-  #----------------------------------------------------------------
-
-  [void]Start([switch]$InBrowser) {
-    $this.GetClosestPort($this.h_port)
-    $this.OpenInBrowser()
-  }
-
-  [void] hidden OpenInBrowser() {
-    try {
-      $_currentPid = [System.Diagnostics.Process]::GetCurrentProcess().Id
-      $_pswsTempDir = Join-Path -Path $env:TEMP -ChildPath "PSWS_$(Get-Random 10000)"
-      $_appModePid = (Start-Process -FilePath (Get-ItemProperty -ErrorAction Stop -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe\')."(default)" -ArgumentList "--app=http://localhost:$($this.h_port)", "--user-data-dir=$($_pswsTempDir)", '--disable-extensions' -PassThru).Id
-      $this.h_pswsTempDir = $_pswsTempDir
-      Start-Job -ScriptBlock {
-        (Get-Process -Id $using:_appModePid).WaitForExit()
-        $url = $using:this.listener.Prefixes | Select-Object -First 1
-        Invoke-RestMethod -Uri "$url/`$end" -Method 'POST'
-      }
-
-      Start-Process powershell.exe -ArgumentList "-NoProfile -WindowStyle Hidden -Command & {(Get-Process -Id $_currentPid).WaitForExit(); (Get-Process -id $_appModePid).Kill(); Remove-Item -Path $this.h_pswsTempDir -Recurse -Force}"
-    }
-    catch {
-      Write-Host "Failed to open browser window: $_" -ForegroundColor Red
-    }
-  }
-
 
   [void]Close() {
     $this.h_listener.Close()
@@ -607,18 +569,31 @@ function Start-WebServer {
   $TreatControlCAsInput = [System.Console]::TreatControlCAsInput
   [System.Console]::TreatControlCAsInput = $true
 
-  [int]$appModePid = $null
+  [System.Collections.ArrayList]$appModePids = [System.Collections.ArrayList]::new()
   [string]$pswsTempDir = $null
         
         
   if ($asApp) {
-    $pswsTempDir = Join-Path -Path $env:TEMP -ChildPath "PSWS_$(Get-Random 10000)"
+    $pswsTempDir = Join-Path -Path $env:TEMP -ChildPath "PSWS_$((New-Guid).Guid)"
     $port = $webserver.FindAndSetClosestPort()
-    $appModePid = (Start-Process -FilePath (Get-ItemProperty -ErrorAction Stop -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe\')."(default)" -ArgumentList "--app=http://localhost:$port", "--user-data-dir=$($pswsTempDir)", '--disable-extensions' -PassThru).Id
-                
+    $appPid = (Start-Process -FilePath (Get-ItemProperty -ErrorAction Stop -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe\')."(default)" -ArgumentList "--app=http://localhost:$port", "--user-data-dir=$($pswsTempDir)", '--disable-extensions' -PassThru).Id
+    [void]$appModePids.Add($appPid)
+    while ($appModePids.Count -le 1) {
+      foreach ($id in ((Get-CimInstance Win32_Process -Filter "Name = 'msedge.exe'" | Where-Object { $_.CommandLine -like "*--user-data-dir=`"$pswsTempDir`"*" }).ProcessId)) {
+        [void]$appModePids.Add($id)
+      }
+      Start-Sleep -Milliseconds 100
+    }
+    
     if ($autoDispose) {
-      $webserver | Register-backgroundScript -ScriptBlock {   
-        if (-not (Get-Process -Id $appModePid -ErrorAction SilentlyContinue) -and $autoDispose) {
+      $webserver | Register-backgroundScript -ScriptBlock {
+        $isAlive = $false
+        foreach ($appModePid in $appModePids) {
+          if (Get-Process -Id $appModePid -ErrorAction SilentlyContinue) {
+            $isAlive = $true
+          }
+        }
+        if (-not $isAlive) {
           $webserver.Close()
         }
       }
@@ -630,14 +605,22 @@ function Start-WebServer {
   if ($autoDispose) {
     $webserver.dispose()
   }
-  if ($appModePid) {
-    $process = (Stop-Process $appModePid -ErrorAction SilentlyContinue -PassThru ) | Get-Process
-    if ($process) {
-      $process.WaitForExit()
+
+  if ($appModePids) {
+    foreach ($appModePid in $appModePids) {
+      $process = (Stop-Process $appModePid -ErrorAction SilentlyContinue -PassThru ) | Get-Process
+      if ($process) {
+        $process.WaitForExit()
+      }
     }
   }
   if ($pswsTempDir) {
-    Remove-Item $pswsTempDir -Force -Recurse          
+    try {  
+      Remove-Item $pswsTempDir -Force -Recurse
+    }
+    catch {
+      Write-Warning "Could not remove temp files: $($_.Exception.Message)"
+    }
   }
   [System.Console]::TreatControlCAsInput = $TreatControlCAsInput
   return $webserver
