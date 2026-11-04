@@ -56,12 +56,44 @@ return { param($requestInfo)
 
   } 
 
+  function Send-Response {
+    param($InputObject, [System.Text.Encoding]$encoding = [System.Text.Encoding]::Default)
+
+    try {
+
+      if (-not $InputObject) {
+        break
+      }
+
+      if ($InputObject -is [System.IO.FileStream]) {
+        [byte[]]$buffer = [byte[]]::new($InputObject.Length)
+        $InputObject.Read($buffer, 0, $InputObject.Length)
+        $InputObject.close()
+        break
+      }
+
+      if (-not ($InputObject -is [string])) {
+        $InputObject = $InputObject | ConvertTo-Json
+      }
+
+      $buffer = $encoding.GetBytes($InputObject)
+      
+    }
+    finally {
+      if ($buffer) {
+        $requestInfo.Context.Response.ContentLength64 = $buffer.Length
+        $requestInfo.Context.Response.OutputStream.Write($buffer, 0, $buffer.Length)
+      }
+      $requestInfo.Context.Response.Close()
+    }
+  }
+
   function Get-Bytes {
     param (
       $InputObject,
       [System.Text.Encoding]$encoding = [System.Text.Encoding]::Default
     )
-
+      
     if (-not ($InputObject -is [string])) {
       $InputObject = $InputObject | ConvertTo-Json
     }
@@ -90,14 +122,13 @@ return { param($requestInfo)
     }
 
     $staticFile = Join-Path -Path $requestInfo.basePath -ChildPath $context.Request.Url.AbsolutePath
-
-    if (Test-Path -Path $staticFile -PathType Leaf) {
-      $script:encoding = [System.Text.Encoding]::UTF8
+    if ((Test-Path -Path $staticFile -PathType Leaf)) {
+    
       try {
-        return Get-Content -Path $staticFile -Raw -Encoding UTF8
+        return [System.IO.FileStream]::new($staticFile, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read)
       }
       catch {
-        $context.Response.Status = 500
+        $context.Response.StatusCode = 500
         return "Error loading page: $($_.Exception.Message)"
       }
     }
@@ -124,7 +155,6 @@ return { param($requestInfo)
       return $ExecutionContext.InvokeCommand.ExpandString($template)
     }
 
-
     $apiItem = Get-WebPathItem -path $requestInfo.basePath -endpoint "$($context.Request.Url.AbsolutePath)" -extentions 'ps1', 'psm1', 'pse1'
     if ($apiItem) {
       try {
@@ -136,6 +166,23 @@ return { param($requestInfo)
       }
     }
     
+
+    if (($requestInfo.Context.Request.Headers.Get('Sec-Fetch-Dest') -eq 'script')) {
+      $staticFile += '.js'
+      if (test-path -Path $staticFile) {
+        $script:encoding = [System.Text.Encoding]::UTF8
+        $context.Response.ContentType = 'Text/JavaScript'
+        try {
+          return Get-Content -Path $staticFile -Raw -Encoding UTF8
+        }
+        catch {
+          $context.Response.Status = 500
+          return "Error loading script: $($_.Exception.Message)"
+        }
+      }
+
+    }
+
     $context.Response.statusCode = 404
 
     $404 = $requestInfo.endpoints.'/404' 
@@ -163,20 +210,17 @@ return { param($requestInfo)
     return "<div>404 - page not found</div>"
   }
             
-         
+        
   try {
-    $requestInfo.result = Invoke-WebPathItem                
+    $requestInfo.result = Invoke-WebPathItem
     if (-not $requestInfo.result) {
       $context.Response.StatusCode = '204'
       $requestInfo.Context.Response.Close()
       return 
     }
-  
-                
-    $buffer = Get-Bytes -InputObject $requestInfo.result -encoding $script:encoding
-    $requestInfo.Context.Response.OutputStream.Write($buffer, 0, $buffer.Length)
-    $requestInfo.Context.Response.Close()
 
+    Send-Response -InputObject $requestInfo.result -encoding $script:encoding | out-null    
+    
     if ($context.Request.Url.AbsolutePath -eq '/$end') {
       return "STOP"     
     }
