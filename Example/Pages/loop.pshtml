@@ -8,9 +8,9 @@
 </head>
 
 <body>
-  <h1>Looping 1-10</h1>
+  <h1>Looping first 10 active processes</h1>
   <ul>
-    $(foreach($i in 1..10){
+    $(foreach($i in (Get-Process | Select-Object -expandProperty Name -unique | Select-Object -first 10)){
     @"
     <li>$i</li>
     "@

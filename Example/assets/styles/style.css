@@ -18,3 +18,12 @@
   background: rgb(255, 175, 167);
   color: rgb(102, 10, 10);
 }
+
+.logo {
+  display: flex;
+  align-items: center;
+  font-size: 1.2rem;
+  & img {
+    height: 30px;
+  }
+}
