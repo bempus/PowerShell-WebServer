@@ -165,7 +165,7 @@ class WebServer {
 
   # State & Data Collections
   hidden [hashtable]                                           $h_endpoints = [hashtable]::new()
-  hidden [hashtable]                                           $h_store = [hashtable]::new()
+  hidden [hashtable]                                           $h_store = [hashtable]::Synchronized(@{})
   hidden [System.Collections.Generic.List[object]]             $h_jobs = $null
 
   # File System & Temp Storage

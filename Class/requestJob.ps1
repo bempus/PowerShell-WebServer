@@ -3,6 +3,11 @@
 return { param($requestInfo)
   Set-Location -Path $requestInfo.basePath
   $context = $requestInfo.Context
+  $sharedContext = @{
+    statusCode = $context.Response.StatusCode
+    Method     = $context.Request.HttpMethod
+  }
+  
   $script:encoding = [System.Text.Encoding]::Default
 
 
@@ -108,7 +113,9 @@ return { param($requestInfo)
 
   function Invoke-ScriptBlock {
     param($scriptblock)
-    return & $scriptblock -body $requestInfo.body -query $requestInfo.query -method $Context.Request.HttpMethod  -store $requestInfo.store -request $Context.Request -basePath $requestInfo.basePath
+    $result = & $scriptblock -body $requestInfo.body -query $requestInfo.query -store $requestInfo.store -basePath $requestInfo.basePath -context $sharedContext
+    $context.Response.StatusCode = $sharedContext.StatusCode
+    return $result
   }
 
   function Invoke-WebPathItem {
@@ -144,11 +151,11 @@ return { param($requestInfo)
     if ($pageTemplateItem) {
       $script:encoding = [System.Text.Encoding]::UTF8
 
-      $body = $requestInfo.body 
-      $query = $requestInfo.query 
-      $method = $Context.Request.HttpMethod  
-      $store = $requestInfo.store 
-      $basePath = $requestInfo.basePath
+      $script:body = $requestInfo.body 
+      $script:query = $requestInfo.query 
+      $script:method = $Context.Request.HttpMethod  
+      $script:store = $requestInfo.store 
+      $script:basePath = $requestInfo.basePath
     
       $template = (Get-Content -Path $pageTemplateItem -Encoding UTF8 -Raw) -replace '\n[ \t]+"@', "`n`"@"
 
@@ -162,6 +169,7 @@ return { param($requestInfo)
         return Invoke-ScriptBlock -scriptblock $apiItem.FullName
       }
       catch {
+        $context.Response.StatusCode = if ($sharedContext.statusCode -ne 200) { $sharedContext.statusCode } else { 500 }
         return $_.Exception.Message
       }
     }

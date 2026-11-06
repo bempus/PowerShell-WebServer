@@ -47,7 +47,7 @@ New-WebServer `
 | `Port`              | Port the server should listen on. Default: `3000`                        |
 | `Path`              | Root folder used for pages, APIs, and static files                       |
 | `BackgroundScripts` | One or more scriptblocks executed repeatedly while the server is running |
-| `Store`             | Hashtable shared across all requests                                     |
+| `Store`             | Synchronized Hashtable shared across all requests                        |
 | `AutoStart`         | Starts the webserver immediately                                         |
 | `AutostartAsApp`    | Starts the webserver and opens it in Microsoft Edge app mode             |
 | `DisposeOnClose`    | Automatically disposes resources when the server closes                  |
@@ -395,9 +395,8 @@ The request execution script processes requests in the following order:
 param(
     $body,
     $query,
-    $method,
+    $context,
     $store,
-    $request,
     $basePath
 )
 
@@ -411,7 +410,7 @@ return @{
     Status      = "Online"
     ServerTime  = (Get-Date)
     TotalVisits = $store.Visits
-    Method      = $method
+    Method      = $context.method
     QueryParam  = $query.name
 }
 
@@ -421,14 +420,13 @@ return @{
 
 When writing dynamic scriptblocks or script files (`.ps1`), the request handler automatically injects the following context parameters:
 
-| Parameter   | Description                          |
-| ----------- | ------------------------------------ |
-| `$body`     | Incoming request body                |
-| `$query`    | Query string parameters              |
-| `$method`   | HTTP method used (GET, POST, etc.)   |
-| `$store`    | Shared application hashtable store   |
-| `$request`  | Raw HTTP listener request object     |
-| `$basePath` | Root directory path of the webserver |
+| Parameter   | Description                                             |
+| ----------- | ------------------------------------------------------- |
+| `$body`     | Incoming request body                                   |
+| `$query`    | Query string parameters                                 |
+| `$context`  | Shared partial context containing StatusCode and Method |
+| `$store`    | Shared application hashtable store                      |
+| `$basePath` | Root directory path of the webserver                    |
 
 # Pipeline Support & Typical Setup
 
