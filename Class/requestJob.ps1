@@ -51,7 +51,7 @@ return { param($requestInfo)
       }
     }
     catch {
-      Throw $_
+      throw $_
     }
     finally {
       if ($reader) {
@@ -140,11 +140,37 @@ return { param($requestInfo)
       }
     }
 
-    $pageItem = Get-WebPathItem -path $requestInfo.basePath -endpoint "$($context.Request.Url.AbsolutePath)" -extentions 'html', 'htm' -isPage
-    if ($pageItem) {
+    $PageItem = Get-WebPathItem -path $requestInfo.basePath -endpoint "$($context.Request.Url.AbsolutePath)" -extentions 'html' -isPage
+    if ($PageItem) {
       $script:encoding = [System.Text.Encoding]::UTF8
 
-      return Get-Content -Path $pageItem -Raw -Encoding UTF8
+      $resultString = ""
+      $split = [regex]'(?=\<\?)|\?\>'
+
+      $PageSession = [initialsessionstate]::CreateDefault()
+      
+      $PageSession.Variables.Add([System.Management.Automation.Runspaces.SessionStateVariableEntry]::new('body', $requestInfo.Body, "Body"))
+      $PageSession.Variables.Add([System.Management.Automation.Runspaces.SessionStateVariableEntry]::new('query', $requestInfo.Query, "Query"))
+      $PageSession.Variables.Add([System.Management.Automation.Runspaces.SessionStateVariableEntry]::new('context', $sharedContext, "Context"))
+      $PageSession.Variables.Add([System.Management.Automation.Runspaces.SessionStateVariableEntry]::new('store', $requestInfo.Store, "Store"))
+      $PageSession.Variables.Add([System.Management.Automation.Runspaces.SessionStateVariableEntry]::new('basePath', $requestInfo.BasePath, "BasePath"))
+
+      [runspace]$parser = [runspacefactory]::CreateRunspace($PageSession)
+      $parser.Open()
+      $null = (Get-Content -Path $PageItem -Encoding UTF8 -Raw) -split $split | ForEach-Object {
+        if ($_ -match '\<\?') {
+          
+          $exec = [powershell]::Create()    
+          $exec.Runspace = $parser
+          $exec.AddScript(($_ -replace '\<\?' -replace '\n[ \t]+"@', "`n`"@"))          
+          $resultString += $exec.Invoke()
+          return
+        }
+        $resultString += $_
+      }
+      $parser.Close()
+
+      return $resultString
     }
 
     $pageTemplateItem = Get-WebPathItem -path $requestInfo.basePath -endpoint "$($context.Request.Url.AbsolutePath)" -extentions 'pshtml', 'pshtm' -isPage
@@ -177,7 +203,7 @@ return { param($requestInfo)
 
     if (($requestInfo.Context.Request.Headers.Get('Sec-Fetch-Dest') -eq 'script')) {
       $staticFile += '.js'
-      if (test-path -Path $staticFile) {
+      if (Test-Path -Path $staticFile) {
         $script:encoding = [System.Text.Encoding]::UTF8
         $context.Response.ContentType = 'Text/JavaScript'
         try {
@@ -202,7 +228,7 @@ return { param($requestInfo)
                     
         
     $404 = Join-Path -Path $requestInfo.basePath -ChildPath '404.html'
-    if (Test-Path -path $404) {
+    if (Test-Path -Path $404) {
       return Get-Content -Path $404 -Raw
     }
     
@@ -227,7 +253,7 @@ return { param($requestInfo)
       return 
     }
 
-    Send-Response -InputObject $requestInfo.result -encoding $script:encoding | out-null    
+    Send-Response -InputObject $requestInfo.result -encoding $script:encoding | Out-Null    
     
     if ($context.Request.Url.AbsolutePath -eq '/$end') {
       return "STOP"     

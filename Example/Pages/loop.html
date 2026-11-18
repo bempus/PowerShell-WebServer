@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <title>About Us</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<? $processCount = $query.items ?>
+
+<body>
+  <h1>Looping
+    <? $processCount ?> random active processes
+  </h1>
+  <ul>
+    <? 
+      foreach($i in (Get-Process | Select-Object -expandProperty Name -unique | Get-Random -Count $processCount )){ 
+        "<li>$i</li>" 
+      } 
+      ?>
+  </ul>
+</body>
+
+</html>
